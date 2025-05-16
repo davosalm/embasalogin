@@ -1,21 +1,15 @@
 {
   "version": 2,
-  "builds": [
-    { 
-      "src": "server/index.ts", 
-      "use": "@vercel/node"
-    },
-    {
-      "src": "package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "dist/public"
-      }
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist/public",
+  "functions": {
+    "server/index.ts": {
+      "memory": 1024,
+      "maxDuration": 10
     }
-  ],
-  "routes": [
-    { "src": "/api/(.*)", "dest": "/server/index.ts" },
-    { "handle": "filesystem" },
-    { "src": "/(.*)", "dest": "/server/index.ts" }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "server/index.ts" },
+    { "source": "/(.*)", "destination": "server/index.ts" }
   ]
 }

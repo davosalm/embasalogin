@@ -1,8 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import session from "express-session";
-import MemoryStore from "memorystore";
+import cookieParser from "cookie-parser";
 import { 
   insertAccessCodeSchema, 
   insertAvailabilitySchema, 
@@ -14,33 +13,14 @@ import { ZodError } from "zod";
 import { fromZodError } from "zod-validation-error";
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  const MemoryStoreSession = MemoryStore(session);
+  // Use cookie parser para gerenciar cookies diretamente em vez de sessões
+  app.use(cookieParser(process.env.SESSION_SECRET || "calendar_scheduling_secret"));
   
-  // Configuração de sessão aprimorada para ambiente serverless
-  const sessionConfig: session.SessionOptions = {
-    cookie: { 
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours
-      httpOnly: true,
-      // Em produção, permitimos cookies inseguros pois o Vercel gerencia HTTPS
-      secure: false
-    },
-    name: "embasa_login_session",
-    secret: process.env.SESSION_SECRET || "calendar_scheduling_secret",
-    resave: true,
-    saveUninitialized: false,
-    store: new MemoryStoreSession({
-      checkPeriod: 86400000 // prune expired entries every 24h
-    }),
-  };
-
-  // Adicionar middleware de sessão com configuração melhorada
-  app.use(session(sessionConfig));
-  
-  // Adicionar middleware de diagnóstico para sessão
+  // Adicionar middleware de diagnóstico
   app.use((req, res, next) => {
     if (req.path.startsWith('/api/auth')) {
-      console.log('Session ID:', req.sessionID);
-      console.log('Session Data:', req.session);
+      console.log('Cookies:', req.cookies);
+      console.log('Signed Cookies:', req.signedCookies);
     }
     next();
   });
@@ -62,25 +42,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     };
   };
 
-  // Authentication middleware
+  // Authentication middleware usando cookies ao invés de sessão
   const requireAuth = (req: Request, res: Response, next: Function) => {
-    if (!req.session.user) {
+    const userData = req.signedCookies.user ? JSON.parse(req.signedCookies.user) : null;
+    
+    if (!userData) {
       return res.status(401).json({ message: "Unauthorized. Please log in." });
     }
+    
+    // Adiciona o usuário do cookie ao objeto req
+    (req as any).user = userData;
     next();
   };
 
   // Role-based authorization middleware
   const requireRole = (roles: string[]) => {
     return (req: Request, res: Response, next: Function) => {
-      if (!req.session.user || !roles.includes(req.session.user.role)) {
+      const userData = (req as any).user;
+      
+      if (!userData || !roles.includes(userData.role)) {
         return res.status(403).json({ message: "Forbidden. Insufficient permissions." });
       }
       next();
     };
   };
 
-  // Authentication routes - melhorada com mais logs e tratamento de erros
+  // Authentication routes - usando cookies em vez de sessão
   app.post("/api/auth/login", validateRequest(loginSchema), async (req, res) => {
     try {
       console.log("Processando login com dados:", req.body);
@@ -99,60 +86,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: "Invalid access code" });
       }
       
-      // Store user in session
-      req.session.user = {
+      // Criar objeto de usuário para armazenar no cookie
+      const userData = {
         id: user.id,
         code: user.code,
         role: user.role
       };
       
-      // Forçar salvamento da sessão
-      req.session.save((err) => {
-        if (err) {
-          console.error("Erro ao salvar sessão:", err);
-          return res.status(500).json({ message: "Erro ao salvar sessão" });
-        }
-        
-        console.log("Sessão salva com sucesso. Sessão atual:", req.session);
-        res.json({ user: req.session.user });
+      // Defina um cookie assinado com os dados do usuário
+      res.cookie('user', JSON.stringify(userData), {
+        signed: true,
+        httpOnly: true,
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        sameSite: 'strict',
+        secure: process.env.NODE_ENV === 'production'
       });
+      
+      console.log("Cookie definido com sucesso para:", userData);
+      res.json({ user: userData });
     } catch (error) {
       console.error("Login error:", error);
       res.status(500).json({ message: "Server error during login" });
     }
   });
 
-  // Rota de teste para verificar se a sessão está funcionando
+  // Rota de teste para verificar se o cookie está funcionando
   app.get("/api/auth/test-session", (req, res) => {
-    console.log("Sessão atual no teste:", req.session);
+    console.log("Cookies atuais:", req.cookies);
+    console.log("Cookies assinados:", req.signedCookies);
+    
+    const userData = req.signedCookies.user ? JSON.parse(req.signedCookies.user) : null;
+    
     res.json({
-      sessionID: req.sessionID,
-      hasSession: !!req.session,
-      user: req.session.user || null
+      hasAuth: !!userData,
+      user: userData
     });
   });
 
   app.post("/api/auth/logout", (req, res) => {
-    if (!req.session.user) {
-      return res.json({ message: "Nenhuma sessão ativa para encerrar" });
-    }
-    
-    req.session.destroy((err) => {
-      if (err) {
-        console.error("Erro ao fazer logout:", err);
-        return res.status(500).json({ message: "Error logging out" });
-      }
-      res.json({ message: "Logged out successfully" });
-    });
+    res.clearCookie('user');
+    res.json({ message: "Logged out successfully" });
   });
 
   app.get("/api/auth/me", (req, res) => {
-    console.log("Verificando usuário atual. Sessão:", req.session);
+    console.log("Verificando usuário atual. Cookies:", req.signedCookies);
     
-    if (!req.session.user) {
+    const userData = req.signedCookies.user ? JSON.parse(req.signedCookies.user) : null;
+    
+    if (!userData) {
       return res.status(401).json({ message: "Not authenticated" });
     }
-    res.json({ user: req.session.user });
+    
+    res.json({ user: userData });
   });
 
   // Access Code routes (Admin only)
@@ -301,7 +286,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           endTime: req.body.endTime,
           capacity: capacity,
           remainingSlots: capacity,
-          createdBy: req.session.user!.code,
+          createdBy: (req as any).user.code,
         });
         
         res.status(201).json(availability);
@@ -326,7 +311,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         
         // Check if the user created this availability
-        if (availability.createdBy !== req.session.user!.code) {
+        if (availability.createdBy !== (req as any).user.code) {
           return res.status(403).json({ message: "You can only delete availabilities you created" });
         }
         
@@ -346,7 +331,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Booking routes (SAC users)
   app.get("/api/bookings", requireAuth, async (req, res) => {
     try {
-      const bookings = await storage.listBookingsByUser(req.session.user!.code);
+      const bookings = await storage.listBookingsByUser((req as any).user.code);
       res.json(bookings);
     } catch (error) {
       console.error("Error fetching bookings:", error);
@@ -375,7 +360,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Create the booking
         const booking = await storage.createBooking({
           ...req.body,
-          createdBy: req.session.user!.code,
+          createdBy: (req as any).user.code,
         });
         
         res.status(201).json(booking);
