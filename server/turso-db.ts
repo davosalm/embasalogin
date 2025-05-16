@@ -1,17 +1,14 @@
 import { createClient } from '@libsql/client';
 import * as schema from "@shared/schema";
 
-// Verificar se as variáveis de ambiente estão definidas
-if (!process.env.TURSO_DB_URL || !process.env.TURSO_AUTH_TOKEN) {
-  throw new Error(
-    "TURSO_DB_URL e TURSO_AUTH_TOKEN devem estar definidos nas variáveis de ambiente."
-  );
-}
+// Usar as credenciais diretas do Turso
+const TURSO_DB_URL = "libsql://agendamentoembasa-davosalm.aws-us-east-1.turso.io";
+const TURSO_AUTH_TOKEN = "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3NDc0MTU2ODIsImlkIjoiY2E4YzRhMmQtZDhlZC00ZjY3LWEwZmMtNjZmNGYyZDZiZTM3IiwicmlkIjoiZjY5OGY1ZmYtMmQzNi00MTcyLTk0ZWMtMmU5NDg2YWZjYmM2In0.YZjtGbzuaYS0sBSgP62-SrnJsBEhd3byKPazzFVcRZcFqN-__y6MAPZcN3WvLCNDpBT14J3bmPwO8KT64-tQAA";
 
-// Criar cliente Turso
+// Criar cliente Turso com as credenciais fixas
 export const tursoClient = createClient({
-  url: process.env.TURSO_DB_URL,
-  authToken: process.env.TURSO_AUTH_TOKEN,
+  url: process.env.TURSO_DB_URL || TURSO_DB_URL,
+  authToken: process.env.TURSO_AUTH_TOKEN || TURSO_AUTH_TOKEN,
 });
 
 // Função para inicializar as tabelas no Turso (SQLite)

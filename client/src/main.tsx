@@ -8,7 +8,7 @@ import { ToastProvider } from '@/components/toast-provider';
 import { ThemeProvider } from 'next-themes';
 
 createRoot(document.getElementById("root")!).render(
-  <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+  <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <ToastProvider />
