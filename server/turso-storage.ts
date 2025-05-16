@@ -10,12 +10,20 @@ export class TursoStorage implements IStorage {
   // Access Code operations
   async getAccessCode(code: string): Promise<AccessCode | undefined> {
     try {
+      console.log(`Tentando buscar código de acesso: ${code}`);
+      
       const result = await tursoClient.execute({
         sql: `SELECT * FROM access_codes WHERE code = ? AND active = 1`,
         args: [code]
       });
 
+      console.log(`Resultado da busca de código de acesso:`, {
+        rowCount: result.rows.length,
+        resultData: result.rows.length > 0 ? result.rows[0] : null
+      });
+
       if (result.rows.length === 0) {
+        console.log(`Nenhum código de acesso encontrado para: ${code}`);
         return undefined;
       }
 
@@ -29,7 +37,7 @@ export class TursoStorage implements IStorage {
         active: Boolean(row.active)
       };
     } catch (error) {
-      console.error("Erro ao buscar código de acesso:", error);
+      console.error(`ERRO ao buscar código de acesso ${code}:`, error);
       return undefined;
     }
   }

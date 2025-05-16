@@ -16,22 +16,34 @@ import { fromZodError } from "zod-validation-error";
 export async function registerRoutes(app: Express): Promise<Server> {
   const MemoryStoreSession = MemoryStore(session);
   
-  // Set up session middleware
-  app.use(
-    session({
-      cookie: { 
-        maxAge: 24 * 60 * 60 * 1000, // 24 hours
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production"
-      },
-      secret: process.env.SESSION_SECRET || "calendar_scheduling_secret",
-      resave: false,
-      saveUninitialized: false,
-      store: new MemoryStoreSession({
-        checkPeriod: 86400000 // prune expired entries every 24h
-      }),
-    })
-  );
+  // Configuração de sessão aprimorada para ambiente serverless
+  const sessionConfig: session.SessionOptions = {
+    cookie: { 
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      httpOnly: true,
+      // Em produção, permitimos cookies inseguros pois o Vercel gerencia HTTPS
+      secure: false
+    },
+    name: "embasa_login_session",
+    secret: process.env.SESSION_SECRET || "calendar_scheduling_secret",
+    resave: true,
+    saveUninitialized: false,
+    store: new MemoryStoreSession({
+      checkPeriod: 86400000 // prune expired entries every 24h
+    }),
+  };
+
+  // Adicionar middleware de sessão com configuração melhorada
+  app.use(session(sessionConfig));
+  
+  // Adicionar middleware de diagnóstico para sessão
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api/auth')) {
+      console.log('Session ID:', req.sessionID);
+      console.log('Session Data:', req.session);
+    }
+    next();
+  });
 
   // Middleware to handle validation errors
   const validateRequest = (schema: z.ZodType<any, any>) => {
@@ -68,11 +80,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     };
   };
 
-  // Authentication routes
+  // Authentication routes - melhorada com mais logs e tratamento de erros
   app.post("/api/auth/login", validateRequest(loginSchema), async (req, res) => {
     try {
+      console.log("Processando login com dados:", req.body);
       const { accessCode } = req.body;
+      
+      if (!accessCode) {
+        return res.status(400).json({ message: "Código de acesso não fornecido" });
+      }
+      
+      console.log("Buscando código de acesso:", accessCode);
       const user = await storage.getAccessCode(accessCode);
+      
+      console.log("Resultado da busca de usuário:", user);
       
       if (!user || !user.active) {
         return res.status(401).json({ message: "Invalid access code" });
@@ -85,16 +106,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
         role: user.role
       };
       
-      res.json({ user: req.session.user });
+      // Forçar salvamento da sessão
+      req.session.save((err) => {
+        if (err) {
+          console.error("Erro ao salvar sessão:", err);
+          return res.status(500).json({ message: "Erro ao salvar sessão" });
+        }
+        
+        console.log("Sessão salva com sucesso. Sessão atual:", req.session);
+        res.json({ user: req.session.user });
+      });
     } catch (error) {
       console.error("Login error:", error);
       res.status(500).json({ message: "Server error during login" });
     }
   });
 
+  // Rota de teste para verificar se a sessão está funcionando
+  app.get("/api/auth/test-session", (req, res) => {
+    console.log("Sessão atual no teste:", req.session);
+    res.json({
+      sessionID: req.sessionID,
+      hasSession: !!req.session,
+      user: req.session.user || null
+    });
+  });
+
   app.post("/api/auth/logout", (req, res) => {
+    if (!req.session.user) {
+      return res.json({ message: "Nenhuma sessão ativa para encerrar" });
+    }
+    
     req.session.destroy((err) => {
       if (err) {
+        console.error("Erro ao fazer logout:", err);
         return res.status(500).json({ message: "Error logging out" });
       }
       res.json({ message: "Logged out successfully" });
@@ -102,6 +147,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/auth/me", (req, res) => {
+    console.log("Verificando usuário atual. Sessão:", req.session);
+    
     if (!req.session.user) {
       return res.status(401).json({ message: "Not authenticated" });
     }

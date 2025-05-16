@@ -7,6 +7,7 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
+// Middleware de log detalhado para diagnóstico
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
@@ -37,7 +38,19 @@ app.use((req, res, next) => {
   next();
 });
 
+// Log erros não tratados no processo
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+});
+
 (async () => {
+  console.log("Iniciando servidor...");
+  console.log("NODE_ENV:", process.env.NODE_ENV);
+  
   // Inicializar o banco de dados Turso
   try {
     await initializeTursoDb();
@@ -48,12 +61,19 @@ app.use((req, res, next) => {
   
   const server = await registerRoutes(app);
 
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  // Middleware de tratamento de erros - melhorado para mostrar mais detalhes
+  app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
+    console.error("ERRO NA APLICAÇÃO:", {
+      path: req.path,
+      method: req.method, 
+      error: err,
+      stack: err.stack
+    });
+    
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
 
     res.status(status).json({ message });
-    throw err;
   });
 
   // importantly only setup vite in development and after
